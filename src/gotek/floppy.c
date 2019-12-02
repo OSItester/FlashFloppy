@@ -40,6 +40,14 @@
 #define dma_wdata_irq 12
 void IRQ_12(void) __attribute__((alias("IRQ_wdata_dma")));
 
+/* Read window timer and output. Some drive controllers and drives require a
+ * signal from a VFO/PLL that is locked to the RDATA cell period. This was added
+ * specifically to work like an 8" floppy drive on an NEC APC computer (1982) */
+/* For now, I am stealing the READYn pin, to demonstrate and test this feature. */
+#define gpio_rwin gpiob
+#define pin_rwin    3
+#define tim_rwin    (tim2)
+
 #define pin_rdata   7
 #define tim_rdata   (tim3)
 #define dma_rdata   (dma1->ch3)

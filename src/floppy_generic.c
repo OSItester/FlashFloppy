@@ -257,7 +257,7 @@ static void timer_dma_init(void)
     tim_rdata->ccer = TIM_CCER_CC2E | ((O_TRUE==0) ? TIM_CCER_CC2P : 0);
     tim_rdata->ccr2 = sysclk_ns(400);
     tim_rdata->dier = TIM_DIER_UDE;
-    tim_rdata->cr2 = 0;
+    tim_rdata->cr2 = (1 << 4); /* MMS=1 (TRGO on CNT_EN), used to start TIM2 for RWIN. */
 
     /* DMA setup: From a circular buffer into the RDATA Timer's ARR. */
     dma_rdata.cpar = (uint32_t)(unsigned long)&tim_rdata->arr;
@@ -299,6 +299,26 @@ static void timer_dma_init(void)
                      DMA_CCR_HTIE |
                      DMA_CCR_TCIE |
                      DMA_CCR_EN);
+
+    /* RWIN Timer setup:
+     * The counter is incremented at full SYSCLK rate.
+     *
+     * Ch.2 (RWIN) is in TOGGLE mode. It toggles when CNT == CCR2. ARR is set to the
+     * same value as CCR2. */
+    /* NOTE: ...to self. Setting CCR2 would be another way to effect a skew relative
+     * to TIM3. I should try that, it might be simpler to understand. */
+    tim_rwin->psc = 0;
+    tim_rwin->ccmr1 = (TIM_CCMR1_CC2S(TIM_CCS_OUTPUT) |
+                        TIM_CCMR1_OC2M(TIM_OCM_TOGGLE));
+    /* Polarity here shouldn't matter, but I'm echoing TIM3 code anyway. */
+    tim_rwin->ccer = TIM_CCER_CC2E | ((O_TRUE==0) ? TIM_CCER_CC2P : 0);
+    /* TODO: Change this value based on bitrate. */
+    tim_rwin->arr = sysclk_ns(1000) - 1;
+    tim_rwin->ccr2 = tim_rwin->arr;
+    tim_rwin->dier = TIM_DIER_UDE;
+    tim_rwin->cr2 = 0;
+    tim_rwin->smcr = (2 << 4) | /* TS=2 (ITR2): trigger TIM3->TIM2 */
+                     (6 << 0);  /* SMS=6 (Trigger Mode): counter starts on TRGI */
 }
 
 static unsigned int drive_calc_track(struct drive *drv)
@@ -422,9 +442,11 @@ static void rdata_stop(void)
 
     /* Turn off the output pin */
     gpio_configure_pin(gpio_data, pin_rdata, GPO_rdata);
+    gpio_configure_pin(gpio_rwin, pin_rwin,  GPO_rwin );
 
-    /* Turn off timer. */
+    /* Turn off timers. */
     tim_rdata->cr1 = 0;
+    tim_rwin->cr1 = 0;
 
     /* track-change = instant: Restart read stream where we left off. */
     if ((ff_cfg.track_change == TRKCHG_instant)
@@ -444,14 +466,23 @@ static void rdata_start(void)
 
     dma_rd->state = DMA_active;
 
-    /* Start timer. */
+    /* Start timers. */
     tim_rdata->egr = TIM_EGR_UG;
+    tim_rwin->egr = TIM_EGR_UG;
+
     tim_rdata->sr = 0; /* dummy write, gives h/w time to process EGR.UG=1 */
-    tim_rdata->cr1 = TIM_CR1_CEN;
+    tim_rwin->sr = 0; /* dummy write, gives h/w time to process EGR.UG=1 */
+
+    tim_rdata->cnt = 0;
+    tim_rwin->cnt = sysclk_ns(370); /* Skew to center RWIN on bit cell time. */
+
+    tim_rdata->cr1 = TIM_CR1_CEN; /* Also starts TIM2 via TIM3.TRGO->TIM2.TRGI */
 
     /* Enable output. */
-    if (drive.sel)
+    if (drive.sel) {
         gpio_configure_pin(gpio_data, pin_rdata, AFO_rdata);
+        gpio_configure_pin(gpio_rwin, pin_rwin,  AFO_rwin );
+    }
 
     /* Exit head-settling state. Ungates INDEX signal. */
     cmpxchg(&drive.step.state, STEP_settling, 0);

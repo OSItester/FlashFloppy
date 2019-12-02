@@ -16,6 +16,10 @@
 #define GPO_rdata GPO_bus
 #define AFO_rdata AFO_bus
 
+/* Pin modes for the read window feature. */
+#define GPO_rwin GPO_bus
+#define AFO_rwin AFO_bus
+
 /* A soft IRQ for handling lower priority work items. */
 static void chgrst_timer(void *_drv);
 static void drive_step_timer(void *_drv);
@@ -273,6 +277,10 @@ void floppy_init(void)
 
     gpio_configure_pin(gpio_data, pin_wdata, GPI_bus);
     gpio_configure_pin(gpio_data, pin_rdata, GPO_bus);
+
+    gpio_configure_pin(gpio_rwin, pin_rwin,  GPO_bus);
+    /* Move TIM2_CH2 from PA1 to PB3. */
+    afio->mapr = (afio->mapr & ~AFIO_MAPR_TIM2_REMAP_FULL) | AFIO_MAPR_TIM2_REMAP_PARTIAL_1;
 
     drive_change_output(drv, outp_dskchg, TRUE);
     drive_change_output(drv, outp_wrprot, TRUE);
